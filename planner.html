@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Unit Headroom Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Track how much capacity or state of charge a power unit has left as its bids clear across sequential markets.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="3" width="8" height="22" rx="1" class="lg-a"/><rect x="17" y="3" width="8" height="22" rx="1" class="lg-a"/><rect x="17" y="9" width="8" height="6" class="lg-b"/><rect x="17" y="15" width="8" height="10" class="lg-c"/><rect x="3" y="12" width="8" height="13" class="lg-c"/><path d="M11 12 L17 9 M11 12 L17 15" class="lg-d"/></svg>
+    <div>
+      <h1>Unit Headroom Tracker</h1>
+      <p>Capacity and SOC left after each market clears</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <label class="sr-only" for="preset">Load example</label>
+    <select id="preset">
+      <option value="">Load example…</option>
+      <optgroup label="Sequential markets">
+        <option value="flexable">Thermal plant · CRM → Day-ahead → Redispatch</option>
+        <option value="battery">Battery · FCR → Day-ahead → Intraday</option>
+      </optgroup>
+      <optgroup label="Ramp window">
+        <option value="slide1">Ramp window inside limits</option>
+        <option value="slide2">Ramp-down clipped by P min</option>
+        <option value="slide3">Ramp-up clipped by P max</option>
+      </optgroup>
+      <optgroup label="Start fresh">
+        <option value="blankThermal">Empty thermal unit</option>
+        <option value="blankStorage">Empty storage unit</option>
+      </optgroup>
+    </select>
+    <button class="btn" id="copyLink" type="button">Copy link</button>
+    <details class="menu" id="exportMenu">
+      <summary class="btn">Export</summary>
+      <div class="menu-pop">
+        <button type="button" data-export="png">Chart as PNG</button>
+        <button type="button" data-export="svg">Chart as SVG</button>
+        <button type="button" data-export="json">Scenario as JSON</button>
+        <button type="button" data-export="copyjson">Copy scenario JSON</button>
+        <label class="menu-file">Import JSON…<input type="file" id="importFile" accept="application/json,.json"></label>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="side">
+    <section class="panel" aria-labelledby="unitTitle">
+      <div class="panel-head">
+        <h2 id="unitTitle">Unit</h2>
+        <div class="seg" role="group" aria-label="Unit type">
+          <button type="button" data-kind="thermal" aria-pressed="true">Thermal</button>
+          <button type="button" data-kind="storage" aria-pressed="false">Storage</button>
+        </div>
+      </div>
+      <label class="field wide"><span>Name</span><input id="unitName" type="text" autocomplete="off"></label>
+      <div id="unitFields" class="fields"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="mkTitle">
+      <div class="panel-head">
+        <h2 id="mkTitle">Markets</h2>
+        <span class="sub">in clearing order</span>
+      </div>
+      <ol id="marketList" class="markets"></ol>
+      <button class="btn block" id="addMarket" type="button">+ Add market</button>
+    </section>
+
+    <details class="panel rules">
+      <summary><h2>How it's computed</h2></summary>
+      <div class="rules-body">
+        <p>Markets clear one after another in the order above. Each accepted bid becomes a commitment that later markets have to respect.</p>
+        <h3>Thermal unit</h3>
+        <ul>
+          <li>Ramp window at step <var>t</var>: <code>U = min(Pmax, P<sub>t−1</sub> + ramp↑)</code>, <code>L = max(Pmin, P<sub>t−1</sub> − ramp↓)</code>. From standstill, <code>U = min(Pmax, max(Pmin, ramp↑))</code>.</li>
+          <li>Energy bids move the operating point <var>P</var>. Positive volumes sell, negative volumes buy back.</li>
+          <li>Reserve bids must stay deliverable: <code>P + R↑ ≤ U</code> and <code>P − R↓ ≥ L</code>.</li>
+          <li>If reserves clear before energy, the unit gets a must-run obligation of <code>L + R↓</code>.</li>
+        </ul>
+        <h3>Storage</h3>
+        <ul>
+          <li>Net power <var>P</var> runs from −charge max to +discharge max. Positive means discharging.</li>
+          <li><code>SOC<sub>t</sub> = SOC<sub>t−1</sub> − P·Δt/η<sub>dis</sub></code> when discharging and <code>− P·Δt·η<sub>ch</sub></code> when charging.</li>
+          <li>Reserves hold back energy for their activation duration: <code>R↑·d/η<sub>dis</sub></code> above SOC min and <code>R↓·d·η<sub>ch</sub></code> below capacity.</li>
+        </ul>
+        <h3>Bids</h3>
+        <ul>
+          <li>Type a volume, or <code>max</code> to offer everything still available (<code>-max</code> buys back or charges as much as possible).</li>
+          <li>Click the outcome button to switch between accepted, partial and rejected.</li>
+          <li>Output and SOC carry into the next step. Reserves are assumed not to be activated.</li>
+        </ul>
+      </div>
+    </details>
+  </aside>
+
+  <div class="main">
+    <section class="panel chart-panel" aria-labelledby="chartTitle">
+      <div class="panel-head">
+        <h2 id="chartTitle">Capacity by step</h2>
+        <span class="sub" id="chartSub"></span>
+      </div>
+      <div id="legend" class="legend"></div>
+      <div class="scroll-x"><svg id="chart" role="img" aria-labelledby="chartTitle"></svg></div>
+      <p class="foot">Click a column to inspect its clearing sequence. Hover any band for its value.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="gridTitle">
+      <div class="panel-head">
+        <h2 id="gridTitle">Bids and outcomes</h2>
+        <span class="sub">volume or <code>max</code> · click ✓ to switch outcome</span>
+      </div>
+      <div class="scroll-x"><table id="bidGrid" class="bids"></table></div>
+    </section>
+
+    <section class="panel" aria-labelledby="seqTitle">
+      <div class="panel-head">
+        <h2 id="seqTitle">Clearing sequence</h2>
+        <label class="steplabel"><span>Step label</span><input id="stepLabel" type="text" autocomplete="off"></label>
+      </div>
+      <div id="issues"></div>
+      <div class="scroll-x"><svg id="seq" role="img" aria-label="Unit state after each market clears"></svg></div>
+      <div class="scroll-x"><table id="ledger" class="ledger"></table></div>
+    </section>
+  </div>
+</main>
+
+<footer class="pagefoot">
+  <span><a href="./">← ASSUME view</a></span>
+  <span>Your scenario is saved in this browser. Use <b>Copy link</b> to share it.</span>
+</footer>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="assets/app.js"></script>
+</body>
+</html>

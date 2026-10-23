@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Unit Headroom Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="See hour by hour how much capacity an ASSUME power plant or storage has left as its market orders are accepted, with examples from the ASSUME test suite.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/assume.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="3" width="8" height="22" rx="1" class="lg-a"/><rect x="17" y="3" width="8" height="22" rx="1" class="lg-a"/><rect x="17" y="9" width="8" height="6" class="lg-b"/><rect x="17" y="15" width="8" height="10" class="lg-c"/><rect x="3" y="12" width="8" height="13" class="lg-c"/><path d="M11 12 L17 9 M11 12 L17 15" class="lg-d"/></svg>
+    <div>
+      <h1>Unit Headroom Tracker</h1>
+      <p>Capacity left per hour as ASSUME units clear their markets</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Unit type">
+      <button type="button" data-kind="storage" aria-pressed="false">Storage</button>
+      <button type="button" data-kind="plant" aria-pressed="true">Power plant</button>
+    </div>
+    <label class="sr-only" for="example">Load example</label>
+    <select id="example"></select>
+    <button class="btn" id="copyLink" type="button">Copy link</button>
+    <details class="menu" id="exportMenu">
+      <summary class="btn">Export</summary>
+      <div class="menu-pop">
+        <button type="button" data-export="png">Chart as PNG</button>
+        <button type="button" data-export="svg">Chart as SVG</button>
+        <button type="button" data-export="json">Scenario as JSON</button>
+        <button type="button" data-export="copyjson">Copy scenario JSON</button>
+        <label class="menu-file">Import JSON…<input type="file" id="importFile" accept="application/json,.json"></label>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="side">
+    <section class="panel" aria-labelledby="unitTitle">
+      <div class="panel-head">
+        <h2 id="unitTitle">Unit</h2>
+        <span class="sub" id="unitClass">PowerPlant</span>
+      </div>
+      <p class="sub">Arguments as in the ASSUME constructor. Leave a ramp empty for <code>None</code>.</p>
+      <div id="unitFields" class="ufields"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="scTitle">
+      <div class="panel-head"><h2 id="scTitle">Simulation</h2></div>
+      <div id="scFields" class="ufields"></div>
+      <label class="toggle"><input type="checkbox" id="optExecute"><span><b>Run <code>execute_current_dispatch</code> after each hour</b><br><span class="sub">Corrects infeasible schedules before the next hour uses them, as during a simulation run. Tests that set <code>outputs</code> directly leave this off.</span></span></label>
+    </section>
+
+    <details class="panel rules">
+      <summary><h2>How it's computed</h2></summary>
+      <div class="rules-body">
+        <p>Each hour, the markets clear in the order of the rows. An accepted order is added to <code>unit.outputs[product_type]</code>, as <code>set_dispatch_plan</code> does. Before every market the tool calls ASSUME's functions on the outputs so far.</p>
+        <h3>Power plant</h3>
+        <ul>
+          <li><code>calculate_min_max_power</code>: <code>max = availability·max_power − capacity_pos − energy</code>, <code>min = min_power + capacity_neg − energy</code>, both clipped at 0.</li>
+          <li><code>calculate_ramp(op_time, previous_power, power, current_power)</code> applies ramp_up, ramp_down, min_operating_time and min_down_time.</li>
+          <li><code>op_time</code> comes from <code>get_operation_time</code> on the previous hours.</li>
+        </ul>
+        <h3>Storage</h3>
+        <ul>
+          <li><code>calculate_min_max_discharge</code> / <code>_charge</code> subtract the sold energy and the reserves, then clip by SOC.</li>
+          <li><code>calculate_ramp_discharge</code> / <code>_charge</code> limit the change from the previous hour.</li>
+          <li>SOC carries over using <code>set_dispatch_plan</code>, or <code>execute_current_dispatch</code> when that option is on.</li>
+        </ul>
+        <h3>Orders</h3>
+        <ul>
+          <li>Type a volume, or <code>max</code> for the volume the flexable strategies would bid (<code>-max</code> for the lowest energy volume).</li>
+          <li>Click ✓ to mark an order as not accepted.</li>
+        </ul>
+      </div>
+    </details>
+  </aside>
+
+  <div class="main">
+    <section class="panel upbanner" id="upBanner" aria-labelledby="upTitle" hidden>
+      <div class="panel-head">
+        <h2 id="upTitle">ASSUME main has changed</h2>
+        <button type="button" class="btn small" data-act="up-hide">Hide</button>
+      </div>
+      <p class="sub" id="upSub"></p>
+      <div id="upList"></div>
+    </section>
+
+    <section class="panel exbanner" id="exBanner" hidden>
+      <div class="ex-top">
+        <a class="ex-src" id="exSrc" target="_blank" rel="noopener"></a>
+        <span id="exSummary"></span>
+      </div>
+      <h2 class="ex-title" id="exTitle"></h2>
+      <p class="ex-note" id="exNote"></p>
+    </section>
+
+    <section class="panel chart-panel" aria-labelledby="chartTitle">
+      <div class="panel-head">
+        <h2 id="chartTitle">Capacity by hour</h2>
+        <span class="chart-head-r"><span class="sub" id="chartSub"></span><button type="button" class="btn small" data-act="code-toggle" id="codeToggle" aria-pressed="true" aria-controls="codeCol">Test code</button></span>
+      </div>
+      <div id="legend" class="legend"></div>
+      <div class="scroll-x"><svg id="chart" role="img" aria-labelledby="chartTitle"></svg></div>
+      <p class="foot">Click a column to see that hour in detail. Hover a band for its value. The bracket right of each column is what ASSUME would still let the unit offer.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="gridTitle">
+      <div class="panel-head">
+        <h2 id="gridTitle">Markets and orders</h2>
+        <div class="stepper" role="group" aria-label="Number of hours">
+          <span class="sub">Hours</span>
+          <button type="button" class="btn small" data-act="hours-" aria-label="One hour less">−</button>
+          <input type="number" id="hours" min="1" max="48" step="1" aria-label="Number of hours">
+          <button type="button" class="btn small" data-act="hours+" aria-label="One hour more">+</button>
+        </div>
+      </div>
+      <div class="scroll-x"><table id="bidGrid" class="bids"></table></div>
+      <div><button class="btn" type="button" data-act="addmarket" id="addMarket">+ Add market</button></div>
+    </section>
+
+    <section class="panel" aria-labelledby="hourTitle">
+      <div class="panel-head">
+        <h2 id="hourTitle">Hour</h2>
+        <span class="sub" id="hourSub"></span>
+      </div>
+      <div id="hourChecks"></div>
+      <div class="scroll-x"><table id="ledger" class="ledger"></table></div>
+      <details class="fold" open>
+        <summary><h3>How ASSUME gets the window after this hour's orders</h3></summary>
+        <div class="explain" id="explain"></div>
+      </details>
+    </section>
+  </div>
+
+  <aside class="codecol" id="codeCol">
+    <section class="panel code-panel" aria-labelledby="codeTitle">
+      <div class="panel-head">
+        <h2 id="codeTitle">Test code</h2>
+        <div class="seg" role="group" aria-label="Which test">
+          <button type="button" data-codetab="assume" aria-pressed="true">ASSUME test</button>
+          <button type="button" data-codetab="mine" aria-pressed="false">Your test</button>
+        </div>
+      </div>
+      <div class="code-head" id="codeHead"></div>
+      <div class="codeopts" id="codeOpts" hidden>
+        <label class="tname"><span>Test name</span><input id="testName" type="text" spellcheck="false" autocomplete="off"></label>
+        <fieldset class="tasserts">
+          <legend>Assert</legend>
+          <label><input type="checkbox" data-ta="before"> window before each market</label>
+          <label><input type="checkbox" data-ta="after"> window after all orders</label>
+          <label><input type="checkbox" data-ta="ramp"> ramp limits</label>
+          <label data-only="plant"><input type="checkbox" data-ta="op"> <code>op_time</code></label>
+          <label data-only="storage"><input type="checkbox" data-ta="soc"> <code>soc</code> at the end of each hour</label>
+          <label id="taExec"><input type="checkbox" data-ta="exec"> <code>execute_current_dispatch</code></label>
+        </fieldset>
+        <div class="codeact">
+          <button type="button" class="btn small primary" data-act="code-copy">Copy test</button>
+          <button type="button" class="btn small" data-act="code-dl">Download .py</button>
+        </div>
+      </div>
+      <div class="code" id="code"></div>
+      <p class="foot" id="codeFoot"></p>
+    </section>
+  </aside>
+</main>
+
+<footer class="pagefoot">
+  <span>Formulas follow <a id="pinLink" href="https://github.com/assume-framework/assume/tree/c325fdd49a6e7cf75efaf3603afd050be356667c/assume/units" target="_blank" rel="noopener">ASSUME <code>c325fdd</code></a>. Heat demand and partial-load efficiency are not modelled. <span id="upStatus" class="upstatus"></span></span>
+  <span>Your scenario is saved in this browser. <a href="planner.html">Generic planner</a></span>
+</footer>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="assets/model.js"></script>
+<script src="assets/examples.js"></script>
+<script src="assets/upstream.js"></script>
+<script src="assets/testcode.js"></script>
+<script src="assets/assume.js"></script>
+</body>
+</html>

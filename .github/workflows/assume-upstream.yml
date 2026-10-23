@@ -1,0 +1,47 @@
+# Weekly check: do the examples still pass, and has ASSUME main changed the tests or functions the tool is ported from?
+# If ASSUME changed, opens (or updates) one issue listing what to port. Run it by hand from the Actions tab too.
+name: ASSUME upstream check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Examples match their ASSUME asserts
+        run: node tools/check-examples.js
+
+      - name: Compare with ASSUME main
+        id: upstream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/check-upstream.js --out upstream-report.md
+
+      - name: Open or update the issue
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          title="ASSUME main has changed since the pinned commit"
+          num=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -z "$num" ]; then
+            gh issue create --title "$title" --body-file upstream-report.md
+          elif ! gh issue view "$num" --json body --jq .body | grep -q "$LATEST"; then
+            gh issue edit "$num" --body-file upstream-report.md
+            gh issue comment "$num" --body "ASSUME main moved to \`${LATEST:0:7}\`. The list above is updated."
+          fi
