@@ -4,7 +4,7 @@ A small browser tool for energy system modellers working with **ASSUME** and **f
 
 It replaces drawing these capacity diagrams by hand.
 
-**Live tool:** `https://<your-user>.github.io/<repo-name>/`
+**Live tool:** https://rqussous.github.io/assume_tests/
 
 ## What it does
 
@@ -71,7 +71,7 @@ python -m http.server 8000
    git push -u origin main
    ```
 2. On GitHub, go to **Settings → Pages**, set **Source** to *Deploy from a branch*, and choose `main` with folder `/ (root)`.
-3. After a minute the tool is live at `https://<your-user>.github.io/<repo-name>/`.
+3. After a minute the tool is live at https://rqussous.github.io/assume_tests/.
 4. The weekly ASSUME check needs nothing else: GitHub Actions is on by default, and the workflow uses the built-in `GITHUB_TOKEN`. On a fork, enable Actions in the **Actions** tab first.
 
 ## Files
